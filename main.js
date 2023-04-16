@@ -8,12 +8,14 @@ const createWindow = () => {
     width: 800,
     height: 600,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegrationInWorker: true
     }
   })
 
-  // and load the index.html of the app.
+  // load the index.html of the app.
   mainWindow.loadFile('index.html')
+
   // add a new option to the main windows menu bar to select a directory
   const { Menu } = require('electron')
   const menu = Menu.buildFromTemplate([
@@ -33,10 +35,8 @@ const createWindow = () => {
     }
   ])
   mainWindow.setMenu(menu)
-  
 
-  // Open the DevTools.
-  // mainWindow.webContents.openDevTools()
+  mainWindow.webContents.openDevTools()
 }
 
 // This method will be called when Electron has finished
@@ -61,15 +61,8 @@ app.on('window-all-closed', () => {
 
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and require them here.
-function loadProject()
-{
-  const zlib = require('zlib');
-  const unzip = zlib.createUnzip();
-  const fs = require('fs');
-  const inp = fs.createReadStream('input.txt.xml');
-  const out = fs.createWriteStream('input2.tx');
-  inp.pipe(unzip).pipe(out);   
-}
+
+const { loadProjectsInDirectory } = require('./project-loading.js');
 
 function saveDirectory()
 {
@@ -92,11 +85,6 @@ function saveDirectory()
   
   //store.set('directory', );
   console.log(store.get('directory'));
-}
 
-// make a function that loads all subdirectories in a directory
-// make a function that loads all files in a directory
-function loadProjectsInDirectory(directoryPath)
-{
-
+  loadProjectsInDirectory(store.get('directory'));
 }

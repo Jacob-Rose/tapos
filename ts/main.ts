@@ -8,18 +8,35 @@ const createWindow = () => {
     width: 800,
     height: 600,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegrationInWorker: true
     }
-    
   })
 
-  // and load the index.html of the app.
+  // load the index.html of the app.
   mainWindow.loadFile('index.html')
 
-  mainWindow
+  // add a new option to the main windows menu bar to select a directory
+  const { Menu } = require('electron')
+  const menu = Menu.buildFromTemplate([
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'Open Project',
+          click() { saveDirectory() }
+        },
+        {
 
-  // Open the DevTools.
-  // mainWindow.webContents.openDevTools()
+          label: 'Exit',
+          click() { app.quit() }
+        }
+      ]
+    }
+  ])
+  mainWindow.setMenu(menu)
+
+  mainWindow.webContents.openDevTools()
 }
 
 // This method will be called when Electron has finished
@@ -42,5 +59,29 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and require them here.
+const { loadProjectsInDirectory } = require('./project-loading.js');
+
+function saveDirectory()
+{
+   // get a directory from the user using file selector
+  const { dialog } = require('electron')
+  const result = dialog.showOpenDialogSync({
+    properties: ['openDirectory']
+  })
+
+  if(result.length == 0)
+  {
+    return
+  }
+
+  // save the directory to a file
+  const Store = require('electron-store');
+  let store = new Store();
+
+  store.set('directory', result[0]);
+  
+  //store.set('directory', );
+  console.log(store.get('directory'));
+
+  loadProjectsInDirectory(store.get('directory'));
+}
