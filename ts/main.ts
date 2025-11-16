@@ -1,87 +1,118 @@
-// Modules to control application life and create native browser window
-const { app, BrowserWindow } = require('electron')
-const path = require('path')
+import { app, BrowserWindow, Menu, dialog, ipcMain } from 'electron';
+import * as path from 'path';
+import Store from 'electron-store';
+import { loadProjectsInDirectory } from './project-loading';
+import { ProjectInfo } from './types';
+import { UserPreferences, defaultPreferences } from './preferences';
+
+const store = new Store();
+let mainWindow: BrowserWindow | null = null;
 
 const createWindow = () => {
-  // Create the browser window.
-  const mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+  // Create the browser window
+  mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      nodeIntegrationInWorker: true
+      nodeIntegration: false,
+      contextIsolation: true
     }
-  })
+  });
 
-  // load the index.html of the app.
-  mainWindow.loadFile('index.html')
+  // Load the index.html
+  mainWindow.loadFile('index.html');
 
-  // add a new option to the main windows menu bar to select a directory
-  const { Menu } = require('electron')
+  // Create menu
   const menu = Menu.buildFromTemplate([
     {
       label: 'File',
       submenu: [
         {
-          label: 'Open Project',
-          click() { saveDirectory() }
+          label: 'Open Project Folder',
+          click() { openProjectFolder(); }
         },
         {
-
+          label: 'Preferences',
+          click() {
+            if (mainWindow) {
+              mainWindow.webContents.send('open-preferences');
+            }
+          }
+        },
+        { type: 'separator' },
+        {
           label: 'Exit',
-          click() { app.quit() }
+          click() { app.quit(); }
         }
       ]
     }
-  ])
-  mainWindow.setMenu(menu)
+  ]);
+  mainWindow.setMenu(menu);
 
-  mainWindow.webContents.openDevTools()
-}
+  // Open dev tools
+  mainWindow.webContents.openDevTools();
+};
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
-app.whenReady().then(() => {
-  createWindow()
-
-  app.on('activate', () => {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-  })
-})
-
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
-})
-
-const { loadProjectsInDirectory } = require('./project-loading.js');
-
-function saveDirectory()
-{
-   // get a directory from the user using file selector
-  const { dialog } = require('electron')
+async function openProjectFolder() {
   const result = dialog.showOpenDialogSync({
     properties: ['openDirectory']
-  })
+  });
 
-  if(result.length == 0)
-  {
-    return
+  if (!result || result.length === 0) {
+    return;
   }
 
-  // save the directory to a file
-  const Store = require('electron-store');
-  let store = new Store();
+  const directory = result[0];
+  store.set('directory', directory);
+  console.log('Selected directory:', directory);
 
-  store.set('directory', result[0]);
-  
-  //store.set('directory', );
-  console.log(store.get('directory'));
+  // Send loading status to renderer
+  if (mainWindow) {
+    mainWindow.webContents.send('projects-loading');
+  }
 
-  loadProjectsInDirectory(store.get('directory'));
+  try {
+    // Load and parse all projects
+    const projects = await loadProjectsInDirectory(directory);
+    console.log(`Loaded ${projects.length} projects`);
+
+    // Send projects to renderer
+    if (mainWindow) {
+      mainWindow.webContents.send('projects-loaded', projects);
+    }
+  } catch (error) {
+    console.error('Error loading projects:', error);
+    if (mainWindow) {
+      mainWindow.webContents.send('projects-error', String(error));
+    }
+  }
 }
+
+// IPC handlers for preferences
+ipcMain.handle('get-preferences', (): UserPreferences => {
+  const prefs = store.get('preferences', defaultPreferences) as UserPreferences;
+  return prefs;
+});
+
+ipcMain.handle('set-preferences', (_event, preferences: UserPreferences) => {
+  store.set('preferences', preferences);
+  return preferences;
+});
+
+// App lifecycle
+app.whenReady().then(() => {
+  createWindow();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});

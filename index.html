@@ -4,16 +4,62 @@
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>TALON - Ableton Project Manager</title>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div>
-        <template id="project-card">
-            <div>
-                <h2>{{title}}</h2>
-                <p>{{description}}</p>
-            </div>
-        </template>
+    <div class="container">
+        <header>
+            <h1>TALON - Ableton Project Manager</h1>
+            <p class="subtitle">Open a project folder from File > Open Project Folder</p>
+        </header>
+
+        <div id="status-bar">
+            <span id="status-text">Ready</span>
+        </div>
+
+        <div id="projects-grid" class="projects-grid">
+            <!-- Project cards will be dynamically inserted here -->
+        </div>
+
+        <div id="empty-state" class="empty-state">
+            <h2>No Projects Loaded</h2>
+            <p>Select a folder containing Ableton projects from the menu</p>
+            <p><strong>File > Open Project Folder</strong></p>
+        </div>
     </div>
+
+    <!-- Preferences Modal -->
+    <div id="preferences-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Preferences</h2>
+                <button id="close-preferences" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="preference-section">
+                    <h3>Track Visibility</h3>
+                    <div class="preference-item">
+                        <label>
+                            <input type="checkbox" id="hide-return-tracks">
+                            Hide Return Tracks
+                        </label>
+                    </div>
+                    <div class="preference-item">
+                        <label>
+                            <input type="checkbox" id="hide-master-track">
+                            Hide Master Track
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="save-preferences" class="btn-primary">Save</button>
+                <button id="cancel-preferences" class="btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
 </body>
 </html>

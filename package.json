@@ -4,7 +4,9 @@
   "description": "talon with a modern web based interface and animations",
   "main": "js/generated/main.js",
   "scripts": {
-    "start": "electron-forge start",
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "start": "npm run build && electron-forge start",
     "package": "electron-forge package",
     "make": "electron-forge make"
   },
@@ -16,7 +18,9 @@
     "@electron-forge/maker-rpm": "^6.1.1",
     "@electron-forge/maker-squirrel": "^6.1.1",
     "@electron-forge/maker-zip": "^6.1.1",
-    "electron": "^33.2.0"
+    "@types/node": "^20.0.0",
+    "electron": "^33.2.0",
+    "typescript": "^5.0.0"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.0",
