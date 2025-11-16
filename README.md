@@ -1,8 +1,10 @@
-# TALON - Ableton Project Manager
+# TAPOS - **That Audio Project Organization System**
 
-**Tool for Ableton Library Organization and Navigation**
+> **⚠️ NOTE: This project was vibe coded** - Don't judge my code quality on this, i made this in a day.
 
-TALON is a modern desktop application built with Electron and TypeScript that helps you organize, visualize, and manage your Ableton Live projects. Quickly browse through your entire project library, see track breakdowns, and filter your view to focus on what matters.
+
+
+TAPOS is a modern desktop application built with Electron and TypeScript that helps you organize, visualize, and manage your Ableton Live projects. Quickly browse through your entire project library, see track breakdowns, and filter your view to focus on what matters.
 
 ## Features
 
@@ -127,7 +129,7 @@ npm run make
 
 ### Ableton File Parsing
 
-Ableton Live project files (`.als`) are actually **gzipped XML** files. TALON:
+Ableton Live project files (`.als`) are actually **gzipped XML** files. TAPOS:
 
 1. Recursively scans directories for `.als` files
 2. Decompresses each file using zlib

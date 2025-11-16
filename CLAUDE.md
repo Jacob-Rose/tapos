@@ -4,164 +4,291 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**TALON (Tool for Ableton Library Organization and Navigation)** is an Electron-based desktop application designed to navigate, label, store, modify, track, and transfer Ableton Live projects. The application extracts useful information from Ableton project files (.als) and displays them in a grid-based interface.
+**TAPOS (That Audio Project Organization System)** is an Electron-based desktop application for managing Ableton Live projects. It scans directories for `.als` files, extracts track information, and displays projects in a filterable grid interface.
 
-This is a migration/rewrite from an earlier JUCE-based C++ implementation (found in `talon-juce/`) to a modern Electron + TypeScript architecture.
+This was migrated from an earlier JUCE-based C++ implementation (found in `talon-juce/`) to Electron + TypeScript.
 
-## Development Commands
+## Core Architecture
 
-### Start the Application
+### Process Model
+
+**Main Process** (`ts/main.ts` → `js/generated/main.js`)
+- Manages application lifecycle and native OS integration
+- Handles file system operations (scanning directories)
+- Stores user preferences via `electron-store`
+- Communicates with renderer via IPC
+
+**Renderer Process** (`index.html` + `renderer.js`)
+- Renders UI using HTML/CSS
+- Receives project data via IPC events
+- Manages user interactions and preferences modal
+- No direct file system access (security via context isolation)
+
+**Preload Script** (`ts/preload.ts` → `js/generated/preload.js`)
+- Bridges main ↔ renderer with `contextBridge`
+- Exposes safe IPC methods to renderer
+- Maintains context isolation for security
+
+### Data Flow
+
+```
+User selects folder
+    ↓
+Main Process: loadProjectsInDirectory()
+    ↓
+For each .als file:
+  - Decompress (gzipped XML)
+  - Parse XML structure
+  - Extract tracks & metadata
+    ↓
+Main Process: IPC send 'projects-loaded'
+    ↓
+Renderer: Receive projects array
+    ↓
+Renderer: Filter based on user preferences
+    ↓
+Renderer: Render project cards in grid
+```
+
+## TypeScript Structure
+
+### Type Definitions (`ts/types.ts`)
+
+```typescript
+interface TrackInfo {
+  name: string;
+  type: 'Audio' | 'MIDI' | 'Return' | 'Master' | 'Unknown';
+  colorId: number;
+}
+
+interface ProjectInfo {
+  name: string;
+  filePath: string;
+  trackCount: number;
+  tracks: TrackInfo[];
+  lastModified: Date;
+}
+```
+
+### User Preferences (`ts/preferences.ts`)
+
+```typescript
+interface UserPreferences {
+  hideReturnTracks: boolean;
+  hideMasterTrack: boolean;
+}
+```
+
+Stored persistently in `electron-store`. Loaded on startup and applied as filters in renderer.
+
+## Ableton File Format
+
+### .als File Structure
+
+Ableton Live project files are **gzipped XML documents**:
+
+```
+.als file → gzip decompress → XML → parse → project data
+```
+
+**XML Hierarchy**:
+```
+Ableton
+  └── LiveSet
+      └── Tracks
+          ├── AudioTrack[]
+          ├── MidiTrack[]
+          ├── ReturnTrack[]
+          └── MasterTrack
+```
+
+**Track Data Extraction** (`ts/project-loading.ts`):
+- Iterate through track types (AudioTrack, MidiTrack, etc.)
+- Extract `Name.EffectiveName` or `Name.UserName`
+- Extract `Color` attribute (Ableton color palette ID)
+- Map track type to enum
+
+### Parsing Pipeline
+
+1. **Scan**: Recursively find `.als` files, skip `Backup/` folders
+2. **Decompress**: `fs.createReadStream` → `zlib.createUnzip` → `fs.createWriteStream`
+3. **Parse**: `fast-xml-parser` with attribute preservation
+4. **Extract**: Navigate XML tree to find track arrays
+5. **Return**: Structured `ProjectInfo` objects
+
+## UI Architecture
+
+### Grid Layout (`styles.css`)
+
+- CSS Grid with `repeat(auto-fill, minmax(350px, 1fr))`
+- Cards expand/contract based on viewport width
+- Smooth hover animations with transforms
+
+### Project Card Components
+
+**Structure**:
+```
+.project-card
+  ├── h3 (project name)
+  ├── .project-info
+  │   ├── Last Modified
+  │   ├── Track Count (filtered)
+  │   └── File Name
+  └── .tracks-section
+      └── .tracks-list (scrollable)
+          └── .track-item[] (color-coded badges)
+```
+
+**Track Type Styling**:
+- Audio: Red (#ff6b6b)
+- MIDI: Teal (#4ecdc4)
+- Return: Yellow (#ffd93d)
+- Master: Purple (#a29bfe)
+
+### Filtering Mechanism
+
+Tracks are filtered **in the renderer** before display:
+```javascript
+filterTracks(tracks) {
+  return tracks.filter(track => {
+    if (preferences.hideReturnTracks && track.type === 'Return') return false;
+    if (preferences.hideMasterTrack && track.type === 'Master') return false;
+    return true;
+  });
+}
+```
+
+Track counts reflect filtered results.
+
+## IPC Communication
+
+### Main → Renderer Events
+
+```javascript
+// Loading started
+webContents.send('projects-loading')
+
+// Projects parsed and ready
+webContents.send('projects-loaded', projects: ProjectInfo[])
+
+// Error occurred
+webContents.send('projects-error', error: string)
+
+// Open preferences modal
+webContents.send('open-preferences')
+```
+
+### Renderer → Main Handlers
+
+```javascript
+// Get stored preferences
+ipcMain.handle('get-preferences') → UserPreferences
+
+// Save new preferences
+ipcMain.handle('set-preferences', preferences) → void
+```
+
+## Key Patterns
+
+### Async Project Loading
+
+Projects are loaded asynchronously to avoid blocking the UI:
+```typescript
+async function loadProjectsInDirectory(dir: string): Promise<ProjectInfo[]> {
+  // Recursively scan directories
+  // Parse each .als file in parallel
+  // Return aggregated results
+}
+```
+
+### Preferences Persistence
+
+User settings are saved immediately on change:
+```typescript
+// Save
+store.set('preferences', newPreferences);
+
+// Load on startup
+const prefs = store.get('preferences', defaultPreferences);
+```
+
+### Modal Management
+
+Preferences modal uses visibility classes:
+```javascript
+modal.classList.add('visible')    // Show
+modal.classList.remove('visible') // Hide
+```
+
+Click outside or cancel/save buttons trigger close.
+
+## Development Workflow
+
+### Build Process
+
 ```bash
-npm start
+npm run build    # Compile TypeScript (ts/ → js/generated/)
+npm run watch    # Auto-compile on file changes
+npm start        # Build + launch Electron
 ```
-Launches the Electron application using electron-forge.
 
-### Build the Application
-```bash
-npm run package
-```
-Packages the application for distribution.
-
-### Create Distributables
-```bash
-npm run make
-```
-Creates platform-specific installers (Windows Squirrel, macOS ZIP, Linux DEB/RPM).
-
-### TypeScript Compilation
-TypeScript files in `ts/` are compiled to `js/generated/` according to `tsconfig.json`. Currently the project has TypeScript source files but the main process still uses plain JavaScript files in the root directory.
-
-## Architecture
-
-### Main Process (Electron)
-- **Entry Point**: `main.js` (should eventually use `js/generated/main.js` from TypeScript)
-- **Menu System**: File menu with "Open Project" to select directories containing Ableton projects
-- **Storage**: Uses `electron-store` to persist the last selected directory
-- **Project Loading**: Orchestrates scanning directories for `.als` files
-
-### Renderer Process
-- **Entry Point**: `index.html`
-- **Preload Script**: `preload.js` - Exposes version information to renderer
-- **UI**: Currently minimal, contains a template for project cards but not yet implemented
-
-### TypeScript Source Files (`ts/`)
-- **`main.ts`**: TypeScript version of main process entry point (mirrors `main.js`)
-- **`project-loading.ts`**: Handles recursive directory scanning and project file processing
-
-### Project File Processing Flow
-
-1. **Directory Selection**: User selects folder via File > Open Project
-2. **Recursive Scanning**: `loadProjectsInDirectory()` recursively finds all `.als` files
-3. **Decompression**: `.als` files are gzipped XML; they're decompressed using zlib
-4. **XML Parsing**: Uncompressed XML is parsed using `xml2js`
-5. **Data Storage**: Parsed project info should be stored and displayed (not yet implemented)
-
-### Key Dependencies
-
-- **electron-store**: Persistent key-value storage
-- **fast-xml-parser** & **xml2js**: XML parsing (both are included, choose one)
-- **zlib**: Decompressing .als files (Ableton files are gzipped XML)
-
-### JUCE Reference Implementation (`talon-juce/`)
-
-The JUCE codebase provides reference for the desired functionality:
-
-**Key Components**:
-- **`AbletonFile`** (`Source/Ableton/AbletonFile.h/.cpp`): Represents an Ableton project file
-  - Decompresses .als files to XML
-  - Parses track information (name, color, type)
-  - Extracts project metadata
-
-- **`ProjectTile`** (`Source/ProjectListBox/ProjectTile.h/.cpp`): Visual card for each project
-  - Displays project name
-  - Shows track list with color-coded bars
-  - Renders in a grid layout
-
-- **`ProjectListBox`** (`Source/ProjectListBox/ProjectListView.h/.cpp`): Grid container
-  - Uses JUCE Grid layout with 3 columns
-  - Implements viewport with scrolling
-  - Updates dynamically when projects are loaded
-
-- **`ProjectFileManager`**: Singleton that manages the list of loaded projects
-- **`AbletonColorPalette`**: Maps Ableton's predefined color IDs to RGB values
-
-### Desired Features (from JUCE README)
-
-**Core Features**:
-- Track breakdown showing all tracks in a project
-- Track prerequisite analysis (required plugins, missing samples)
-- Project prerequisite breakdown
-- Custom extraction settings for transferring projects
-- Cleaning utility to remove unused samples
-- Version control integration (git for uncompressed XML)
-
-**MVP Target**:
-- Scroll grid with per-project breakdown
-- Display critical info: track count, track names, longest track length
-- Visual project cards similar to JUCE implementation
-
-## Current State (MVP COMPLETE!)
-
-### What Works ✅
-- Electron application with TypeScript source
-- Directory selection via File > Open Project Folder
-- Recursive `.als` file discovery
-- Decompression of `.als` to XML
-- Full XML parsing with track extraction
-- IPC communication (main → renderer)
-- Grid layout with responsive project cards
-- Track display with type badges (Audio/MIDI/Return/Master)
-- Beautiful gradient UI with smooth animations
-- Empty state when no projects loaded
-
-### Implementation Details
-- **TypeScript Source**: All logic in `ts/` directory, compiled to `js/generated/`
-- **Type Safety**: Interfaces defined in `ts/types.ts` for ProjectInfo and TrackInfo
-- **Parser**: `ts/project-loading.ts` handles .als decompression and XML parsing
-- **Main Process**: `ts/main.ts` orchestrates directory scanning and IPC
-- **Preload**: `ts/preload.ts` exposes safe IPC methods via contextBridge
-- **Renderer**: `renderer.js` creates dynamic project cards
-- **Styling**: `styles.css` with modern gradient design
-
-### Known Limitations
-- Longest track length not yet extracted (need to parse timeline data from XML)
-- No project sorting/filtering
-- No search functionality
-- Performance untested with large project libraries (100+ projects)
-
-### Working with Ableton .als Files
-
-**.als File Structure**:
-- Gzip-compressed XML document
-- Must decompress first, then parse XML
-- Contains nested structure with LiveSet > Tracks > Track elements
-- Each track has: Name, Color ID, Type (Audio/MIDI/Return/Master)
-
-**Processing Steps**:
-1. Create read stream from `.als` file
-2. Pipe through `zlib.createUnzip()`
-3. Write to temporary XML file or parse stream directly
-4. Parse XML to extract track information
-5. Store structured data for UI rendering
-
-## File Structure
+### File Organization
 
 ```
-talon-electron/
-├── main.js              # Main process entry (active)
-├── preload.js           # Preload script
-├── project-loading.js   # Project scanning logic (active)
-├── index.html           # Renderer HTML
-├── package.json         # Dependencies & scripts
-├── tsconfig.json        # TypeScript configuration
-├── forge.config.js      # Electron Forge config
-├── ts/                  # TypeScript sources
-│   ├── main.ts
-│   └── project-loading.ts
-├── js/generated/        # Compiled TypeScript output
-└── talon-juce/          # JUCE reference implementation (C++)
-    └── Source/
-        ├── Ableton/
-        ├── ProjectListBox/
-        └── Managers/
+ts/                     # TypeScript source (canonical)
+├── main.ts            # Main process logic
+├── preload.ts         # IPC bridge
+├── project-loading.ts # .als parser
+├── types.ts           # Shared interfaces
+├── preferences.ts     # Preferences types
+└── renderer.d.ts      # Window interface declarations
+
+js/generated/          # Compiled output (gitignored)
+
+renderer.js            # Renderer logic (plain JS)
+styles.css             # All UI styling
+index.html             # App window structure
 ```
+
+### Adding New Features
+
+**New Track Filter**:
+1. Add boolean to `UserPreferences` interface
+2. Add checkbox to preferences modal in `index.html`
+3. Update `filterTracks()` in `renderer.js`
+4. Preferences auto-persist via existing handlers
+
+**New Project Metadata**:
+1. Add field to `ProjectInfo` interface
+2. Extract data in `parseProject()` function
+3. Display in `createProjectCard()` renderer function
+
+## Dependencies
+
+- **electron**: Cross-platform desktop framework
+- **electron-forge**: Build tooling and packaging
+- **electron-store**: Simple persistent storage
+- **fast-xml-parser**: XML parsing with attribute support
+- **typescript**: Type-safe development
+- **zlib**: Built-in Node.js decompression
+
+## Future Roadmap
+
+Features planned but not yet implemented:
+
+- **Search/Sort**: Filter projects by name, date, track count
+- **Project Opening**: Launch Ableton with selected project
+- **Sample Analysis**: Detect missing samples and plugins
+- **Timeline Length**: Extract and display project duration
+- **Export**: Generate project reports or transfer packages
+- **Settings**: Additional preferences (theme, layout density)
+
+## JUCE Reference Code
+
+The `talon-juce/` folder contains the original C++ implementation. Key insights:
+
+- **AbletonColorPalette**: Maps color IDs to RGB (useful for future enhancements)
+- **Track Rendering**: JUCE renders tracks as colored bars (we use badges)
+- **Grid Layout**: 3-column grid with object pooling for performance
+
+Reference but don't copy directly - the Electron version uses web technologies with different patterns.

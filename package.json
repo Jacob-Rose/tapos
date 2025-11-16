@@ -1,7 +1,7 @@
 {
-  "name": "talon-electron",
+  "name": "tapos",
   "version": "0.1.0",
-  "description": "talon with a modern web based interface and animations",
+  "description": "TAPOS - That Audio Project Organization System for Ableton Live",
   "main": "js/generated/main.js",
   "scripts": {
     "build": "tsc",
