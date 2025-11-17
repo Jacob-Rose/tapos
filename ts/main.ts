@@ -197,10 +197,10 @@ async function loadAllProjects() {
         DIRECTORY_LOAD_TIMEOUT,
         recursionDepth,
         (project: ProjectInfo) => {
-          // Send each project to renderer as it's found
+          // Send each project individually to renderer as it's found
           allProjectsCollector.push(project);
           if (mainWindow) {
-            mainWindow.webContents.send('projects-loaded', [...allProjectsCollector]);
+            mainWindow.webContents.send('project-added', project);
           }
         }
       );

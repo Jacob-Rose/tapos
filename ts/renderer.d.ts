@@ -4,6 +4,7 @@ import { UserPreferences } from './preferences';
 export interface ElectronAPI {
   onProjectsLoading: (callback: () => void) => void;
   onProjectsLoaded: (callback: (projects: ProjectInfo[]) => void) => void;
+  onProjectAdded: (callback: (project: ProjectInfo) => void) => void;
   onProjectsError: (callback: (error: string) => void) => void;
   onOpenPreferences: (callback: () => void) => void;
   getPreferences: () => Promise<UserPreferences>;

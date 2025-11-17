@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onProjectsLoaded: (callback: (projects: ProjectInfo[]) => void) => {
     ipcRenderer.on('projects-loaded', (_event, projects) => callback(projects));
   },
+  onProjectAdded: (callback: (project: ProjectInfo) => void) => {
+    ipcRenderer.on('project-added', (_event, project) => callback(project));
+  },
   onProjectsError: (callback: (error: string) => void) => {
     ipcRenderer.on('projects-error', (_event, error) => callback(error));
   },

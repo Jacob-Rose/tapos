@@ -22,6 +22,7 @@ let currentPreferences = {
   directories: []
 };
 let tempDirectories = []; // Temporary directories list for modal editing
+let projectGroups = new Map(); // Track project groups by directory path
 
 // Load preferences on startup
 async function loadPreferences() {
@@ -47,10 +48,29 @@ window.electronAPI.onProjectsLoading(() => {
   emptyState.classList.remove('visible');
 });
 
-// Listen for projects loaded
+// Listen for individual project added (incremental)
+window.electronAPI.onProjectAdded((project) => {
+  currentProjects.push(project);
+
+  // Add to appropriate group
+  addProjectToGroup(project);
+
+  // Hide empty state if this is the first project
+  if (currentProjects.length === 1) {
+    emptyState.classList.remove('visible');
+  }
+
+  // Update status
+  statusText.textContent = `Loaded ${currentProjects.length} project${currentProjects.length !== 1 ? 's' : ''}`;
+});
+
+// Listen for projects loaded (full refresh)
 window.electronAPI.onProjectsLoaded((projects) => {
-  console.log('Projects loaded:', projects);
+  console.log('Projects loaded (full refresh):', projects);
   currentProjects = projects;
+
+  // Clear everything and start fresh
+  projectGroups.clear();
   displayProjects();
 });
 
@@ -90,6 +110,49 @@ manualLoadBtn.addEventListener('click', async () => {
     manualLoadBtn.textContent = 'Load Projects';
   }
 });
+
+/**
+ * Add a single project to its group and update the UI
+ */
+function addProjectToGroup(project) {
+  // Get the directory path (parent folder of the .als file)
+  const pathParts = project.filePath.split(/[\\/]/);
+  const fileName = pathParts.pop(); // Remove filename
+  const directoryPath = pathParts.join('/');
+
+  // Check if group exists
+  if (!projectGroups.has(directoryPath)) {
+    // Create new group
+    const directoryName = pathParts[pathParts.length - 1] || 'Unknown Project';
+    const newGroup = {
+      directoryPath: directoryPath,
+      projectName: directoryName,
+      versions: [project],
+      selectedVersionIndex: 0
+    };
+    projectGroups.set(directoryPath, newGroup);
+
+    // Create and append card
+    const card = createProjectGroupCard(newGroup);
+    card.dataset.directoryPath = directoryPath; // Store reference
+    projectsGrid.appendChild(card);
+  } else {
+    // Add to existing group
+    const group = projectGroups.get(directoryPath);
+    group.versions.push(project);
+
+    // Sort versions by last modified (newest first)
+    group.versions.sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified));
+
+    // Find and update the existing card
+    const existingCard = projectsGrid.querySelector(`[data-directory-path="${directoryPath}"]`);
+    if (existingCard) {
+      const newCard = createProjectGroupCard(group);
+      newCard.dataset.directoryPath = directoryPath;
+      existingCard.replaceWith(newCard);
+    }
+  }
+}
 
 /**
  * Group projects by their parent directory
@@ -140,12 +203,19 @@ function displayProjects() {
 
   emptyState.classList.remove('visible');
 
-  // Group projects by directory
-  const projectGroups = groupProjectsByDirectory(currentProjects);
+  // Group projects by directory (creates new Map)
+  const groupsArray = groupProjectsByDirectory(currentProjects);
+
+  // Rebuild the projectGroups map
+  projectGroups.clear();
+  groupsArray.forEach(group => {
+    projectGroups.set(group.directoryPath, group);
+  });
 
   // Create a card for each project group
-  projectGroups.forEach(group => {
+  groupsArray.forEach(group => {
     const card = createProjectGroupCard(group);
+    card.dataset.directoryPath = group.directoryPath; // Store reference
     projectsGrid.appendChild(card);
   });
 }
