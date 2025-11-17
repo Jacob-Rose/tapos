@@ -162,40 +162,45 @@ function createProjectGroupCard(group) {
   title.textContent = group.projectName;
   card.appendChild(title);
 
-  // Version selector (if multiple versions exist)
+  // Version selector (always show, but disable if only one version)
+  const versionSelector = document.createElement('div');
+  versionSelector.className = 'version-selector';
+
+  const versionLabel = document.createElement('label');
+  versionLabel.textContent = 'Version: ';
+  versionLabel.className = 'version-label';
+
+  const versionDropdown = document.createElement('select');
+  versionDropdown.className = 'version-dropdown';
+
+  // Disable if only one version
+  if (group.versions.length === 1) {
+    versionDropdown.disabled = true;
+  }
+
+  group.versions.forEach((version, index) => {
+    const option = document.createElement('option');
+    option.value = index;
+    option.textContent = version.name;
+    if (index === group.selectedVersionIndex) {
+      option.selected = true;
+    }
+    versionDropdown.appendChild(option);
+  });
+
+  // Handle version change (only if multiple versions)
   if (group.versions.length > 1) {
-    const versionSelector = document.createElement('div');
-    versionSelector.className = 'version-selector';
-
-    const versionLabel = document.createElement('label');
-    versionLabel.textContent = 'Version: ';
-    versionLabel.className = 'version-label';
-
-    const versionDropdown = document.createElement('select');
-    versionDropdown.className = 'version-dropdown';
-
-    group.versions.forEach((version, index) => {
-      const option = document.createElement('option');
-      option.value = index;
-      option.textContent = version.name;
-      if (index === group.selectedVersionIndex) {
-        option.selected = true;
-      }
-      versionDropdown.appendChild(option);
-    });
-
-    // Handle version change
     versionDropdown.addEventListener('change', (e) => {
       group.selectedVersionIndex = parseInt(e.target.value);
       // Re-render just this card
       const newCard = createProjectGroupCard(group);
       card.replaceWith(newCard);
     });
-
-    versionSelector.appendChild(versionLabel);
-    versionSelector.appendChild(versionDropdown);
-    card.appendChild(versionSelector);
   }
+
+  versionSelector.appendChild(versionLabel);
+  versionSelector.appendChild(versionDropdown);
+  card.appendChild(versionSelector);
 
   // Get the currently selected version
   const selectedProject = group.versions[group.selectedVersionIndex];

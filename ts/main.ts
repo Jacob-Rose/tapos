@@ -205,7 +205,7 @@ async function loadAllProjects() {
         }
       );
 
-      console.log(`  → Loaded ${projects.length} projects from ${dir.path}`);
+      console.log(`  > Loaded ${projects.length} projects from ${dir.path}`);
 
       return {
         path: dir.path,
