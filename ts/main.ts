@@ -1,10 +1,12 @@
 import { app, BrowserWindow, Menu, dialog, ipcMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { Worker } from 'worker_threads';
+import * as os from 'os';
 import Store from 'electron-store';
 import { ProjectInfo } from './types';
 import { UserPreferences, defaultPreferences } from './preferences';
+import { WorkerPool } from './worker-pool';
+import { scanForALSFiles } from './file-scanner';
 
 const store = new Store();
 let mainWindow: BrowserWindow | null = null;
@@ -36,41 +38,40 @@ async function directoryExists(dirPath: string): Promise<boolean> {
 }
 
 /**
- * Load projects using worker thread (non-blocking)
+ * Load projects using worker pool (highly parallel)
  */
-function loadProjectsInWorker(
+async function loadDirectoryWithWorkerPool(
   dirPath: string,
   maxDepth: number,
   onProjectFound: (project: ProjectInfo) => void,
-  onComplete: () => void,
-  onError: (error: string) => void
-): void {
-  const workerPath = path.join(__dirname, 'project-worker.js');
-  const worker = new Worker(workerPath);
+  onError: (filePath: string, error: string) => void
+): Promise<void> {
+  // First, scan for all .als files (fast, no parsing)
+  console.log(`  Scanning for .als files...`);
+  const alsFiles = await scanForALSFiles(dirPath, maxDepth);
+  console.log(`  Found ${alsFiles.length} files to process`);
 
-  worker.on('message', (message) => {
-    if (message.type === 'project-found') {
-      onProjectFound(message.project);
-    } else if (message.type === 'directory-complete') {
-      worker.terminate();
-      onComplete();
-    } else if (message.type === 'error') {
-      worker.terminate();
-      onError(message.error);
-    }
-  });
+  if (alsFiles.length === 0) {
+    return;
+  }
 
-  worker.on('error', (error) => {
-    console.error('Worker error:', error);
-    worker.terminate();
-    onError(error.message);
-  });
+  // Create worker pool and process all files in parallel
+  return new Promise((resolve) => {
+    // Limit to 8 workers max (more causes memory issues)
+    const workerCount = Math.min(8, os.cpus().length);
 
-  // Send load command to worker
-  worker.postMessage({
-    type: 'load-directory',
-    directoryPath: dirPath,
-    maxDepth: maxDepth
+    const pool = new WorkerPool(
+      workerCount,
+      onProjectFound,
+      () => {
+        // All files processed
+        resolve();
+      },
+      onError
+    );
+
+    pool.addFiles(alsFiles);
+    pool.start();
   });
 }
 
@@ -221,14 +222,14 @@ async function loadAllProjects() {
       };
     }
 
-    // Use worker thread for loading (non-blocking)
+    // Use worker pool for loading (highly parallel)
     const recursionDepth = dir.recursive ? Infinity : 1;
     console.log(`Loading projects from: ${dir.path} (depth: ${dir.recursive ? 'unlimited' : '1 level'})`);
 
-    return new Promise((resolve) => {
-      const dirProjects: ProjectInfo[] = [];
+    const dirProjects: ProjectInfo[] = [];
 
-      loadProjectsInWorker(
+    try {
+      await loadDirectoryWithWorkerPool(
         dir.path,
         recursionDepth,
         (project: ProjectInfo) => {
@@ -239,28 +240,28 @@ async function loadAllProjects() {
             mainWindow.webContents.send('project-added', project);
           }
         },
-        () => {
-          // Worker completed successfully
-          console.log(`  > Loaded ${dirProjects.length} projects from ${dir.path}`);
-          resolve({
-            path: dir.path,
-            projects: dirProjects,
-            error: null,
-            invalid: false
-          });
-        },
-        (error: string) => {
-          // Worker encountered error
-          console.error(`Error loading from ${dir.path}:`, error);
-          resolve({
-            path: dir.path,
-            projects: dirProjects,
-            error: error,
-            invalid: false
-          });
+        (filePath: string, error: string) => {
+          console.error(`Failed to parse ${filePath}:`, error);
         }
       );
-    });
+
+      console.log(`  > Loaded ${dirProjects.length} projects from ${dir.path}`);
+      return {
+        path: dir.path,
+        projects: dirProjects,
+        error: null,
+        invalid: false
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`Error loading from ${dir.path}:`, errorMsg);
+      return {
+        path: dir.path,
+        projects: dirProjects,
+        error: errorMsg,
+        invalid: false
+      };
+    }
   });
 
   // Wait for all directories to finish loading (in parallel)
