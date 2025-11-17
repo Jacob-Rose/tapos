@@ -1,8 +1,8 @@
 import { app, BrowserWindow, Menu, dialog, ipcMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import { Worker } from 'worker_threads';
 import Store from 'electron-store';
-import { loadProjectsInDirectory } from './project-loading';
 import { ProjectInfo } from './types';
 import { UserPreferences, defaultPreferences } from './preferences';
 
@@ -14,6 +14,14 @@ const DIRECTORY_LOAD_TIMEOUT = 300000;
 
 // Check if launched in safe mode
 const isSafeMode = process.argv.includes('--safe-mode');
+
+// Type for directory load results
+interface DirectoryLoadResult {
+  path: string;
+  projects: ProjectInfo[];
+  error: string | null;
+  invalid: boolean;
+}
 
 /**
  * Check if a directory exists and is accessible
@@ -27,17 +35,43 @@ async function directoryExists(dirPath: string): Promise<boolean> {
   }
 }
 
-// No longer needed - timeout is per-project now
-// Kept for backward compatibility but with very long timeout as safety net
-async function loadProjectsWithTimeout(
+/**
+ * Load projects using worker thread (non-blocking)
+ */
+function loadProjectsInWorker(
   dirPath: string,
-  timeoutMs: number,
-  maxDepth: number = 1,
-  onProjectFound?: (project: ProjectInfo) => void
-): Promise<ProjectInfo[]> {
-  // Just pass through to loadProjectsInDirectory with callback
-  // Individual projects have their own timeouts now
-  return loadProjectsInDirectory(dirPath, maxDepth, onProjectFound);
+  maxDepth: number,
+  onProjectFound: (project: ProjectInfo) => void,
+  onComplete: () => void,
+  onError: (error: string) => void
+): void {
+  const workerPath = path.join(__dirname, 'project-worker.js');
+  const worker = new Worker(workerPath);
+
+  worker.on('message', (message) => {
+    if (message.type === 'project-found') {
+      onProjectFound(message.project);
+    } else if (message.type === 'directory-complete') {
+      worker.terminate();
+      onComplete();
+    } else if (message.type === 'error') {
+      worker.terminate();
+      onError(message.error);
+    }
+  });
+
+  worker.on('error', (error) => {
+    console.error('Worker error:', error);
+    worker.terminate();
+    onError(error.message);
+  });
+
+  // Send load command to worker
+  worker.postMessage({
+    type: 'load-directory',
+    directoryPath: dirPath,
+    maxDepth: maxDepth
+  });
 }
 
 const createWindow = () => {
@@ -171,7 +205,7 @@ async function loadAllProjects() {
   const allProjectsCollector: ProjectInfo[] = [];
 
   // Load all directories in parallel using Promise.allSettled
-  const loadPromises = enabledDirs.map(async (dir) => {
+  const loadPromises = enabledDirs.map(async (dir): Promise<DirectoryLoadResult> => {
     console.log(`Checking directory: ${dir.path}`);
 
     // Check if directory exists
@@ -187,43 +221,46 @@ async function loadAllProjects() {
       };
     }
 
-    try {
-      const recursionDepth = dir.recursive ? Infinity : 1;
-      console.log(`Loading projects from: ${dir.path} (depth: ${dir.recursive ? 'unlimited' : '1 level'})`);
+    // Use worker thread for loading (non-blocking)
+    const recursionDepth = dir.recursive ? Infinity : 1;
+    console.log(`Loading projects from: ${dir.path} (depth: ${dir.recursive ? 'unlimited' : '1 level'})`);
 
-      // Load projects with incremental updates
-      const projects = await loadProjectsWithTimeout(
+    return new Promise((resolve) => {
+      const dirProjects: ProjectInfo[] = [];
+
+      loadProjectsInWorker(
         dir.path,
-        DIRECTORY_LOAD_TIMEOUT,
         recursionDepth,
         (project: ProjectInfo) => {
           // Send each project individually to renderer as it's found
+          dirProjects.push(project);
           allProjectsCollector.push(project);
           if (mainWindow) {
             mainWindow.webContents.send('project-added', project);
           }
+        },
+        () => {
+          // Worker completed successfully
+          console.log(`  > Loaded ${dirProjects.length} projects from ${dir.path}`);
+          resolve({
+            path: dir.path,
+            projects: dirProjects,
+            error: null,
+            invalid: false
+          });
+        },
+        (error: string) => {
+          // Worker encountered error
+          console.error(`Error loading from ${dir.path}:`, error);
+          resolve({
+            path: dir.path,
+            projects: dirProjects,
+            error: error,
+            invalid: false
+          });
         }
       );
-
-      console.log(`  > Loaded ${projects.length} projects from ${dir.path}`);
-
-      return {
-        path: dir.path,
-        projects: projects,
-        error: null,
-        invalid: false
-      };
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error(`Error loading from ${dir.path}:`, errorMsg);
-
-      return {
-        path: dir.path,
-        projects: [] as ProjectInfo[],
-        error: errorMsg,
-        invalid: false
-      };
-    }
+    });
   });
 
   // Wait for all directories to finish loading (in parallel)
