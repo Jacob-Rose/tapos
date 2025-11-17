@@ -2,9 +2,7 @@
 
 > **⚠️ NOTE: This project was vibe coded** - Don't judge my code quality on this, i made this in a day.
 
-
-
-JAPOS is a modern desktop application built with Electron and TypeScript that helps you organize, visualize, and manage your Ableton Live projects. Quickly browse through your entire project library, see track breakdowns, and filter your view to focus on what matters.
+JAPOS is a modern desktop application built with Electron and TypeScript that helps you organize, visualize, and manage your Ableton Live projects (with other DAWs planned for future). Quickly browse through your entire project library, see track breakdowns, and filter your view to focus on what matters.
 
 ## Features
 
@@ -22,7 +20,6 @@ JAPOS is a modern desktop application built with Electron and TypeScript that he
   - 🟡 Return tracks
   - 🟣 Master track
 - **Smooth animations** and hover effects
-- **Gradient background** with glassmorphism design
 
 ### ⚙️ Customizable Preferences
 - **Filter tracks** by type (hide returns/master)
@@ -140,30 +137,6 @@ Ableton Live project files (`.als`) are actually **gzipped XML** files. JAPOS:
    - Project metadata
 4. Displays everything in a beautiful grid interface
 
-## Roadmap
-
-- [ ] Click to open projects in Ableton
-- [ ] Project search and filtering
-- [ ] Sort by name, date, or track count
-- [ ] Track length/duration analysis
-- [ ] Plugin and sample dependency tracking
-- [ ] Missing file detection
-- [ ] Export project summaries
-- [ ] Dark mode theme
-- [ ] Multi-language support
-
 ## Contributing
 
 This is a personal project, but suggestions and feedback are welcome! Feel free to open issues for bugs or feature requests.
-
-## License
-
-ISC License - See LICENSE file for details
-
-## Author
-
-Jake Rose
-
----
-
-Built with ❤️ using Electron and TypeScript
