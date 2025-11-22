@@ -10,6 +10,7 @@ import { scanForALSFiles } from './file-scanner';
 
 const store = new Store();
 let mainWindow: BrowserWindow | null = null;
+let activeWorkerPool: WorkerPool | null = null;
 
 // Timeout duration for loading from each directory (5 minutes)
 const DIRECTORY_LOAD_TIMEOUT = 300000;
@@ -55,6 +56,12 @@ async function loadDirectoryWithWorkerPool(
     return;
   }
 
+  // Terminate any existing pool before creating a new one
+  if (activeWorkerPool) {
+    activeWorkerPool.terminate();
+    activeWorkerPool = null;
+  }
+
   // Create worker pool and process all files in parallel
   return new Promise((resolve) => {
     // Limit to 8 workers max (more causes memory issues)
@@ -65,11 +72,13 @@ async function loadDirectoryWithWorkerPool(
       onProjectFound,
       () => {
         // All files processed
+        activeWorkerPool = null;
         resolve();
       },
       onError
     );
 
+    activeWorkerPool = pool;
     pool.addFiles(alsFiles);
     pool.start();
   });
@@ -184,14 +193,14 @@ async function loadAllProjects() {
   const enabledDirs = prefs.directories.filter(d => d.enabled);
 
   if (enabledDirs.length === 0) {
-    if (mainWindow) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('projects-loaded', []);
     }
     return;
   }
 
   // Send loading status to renderer immediately
-  if (mainWindow) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('projects-loading');
     // Clear existing projects for fresh load
     mainWindow.webContents.send('projects-loaded', []);
@@ -232,7 +241,7 @@ async function loadAllProjects() {
           // Send each project individually to renderer as it's found
           dirProjects.push(project);
           allProjectsCollector.push(project);
-          if (mainWindow) {
+          if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('project-added', project);
           }
         },
@@ -295,7 +304,7 @@ async function loadAllProjects() {
   console.log(`Total: Loaded ${allProjectsCollector.length} projects from ${enabledDirs.length - invalidDirs.length} valid directories`);
 
   // Final update to renderer (already sent incrementally, but ensure final state)
-  if (mainWindow) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('projects-loaded', allProjectsCollector);
 
     // If there were errors but we still loaded some projects, log them
@@ -366,5 +375,14 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
+  }
+});
+
+app.on('before-quit', () => {
+  // Terminate any active worker pools to prevent errors on shutdown
+  if (activeWorkerPool) {
+    console.log('Terminating worker pool before quit...');
+    activeWorkerPool.terminate();
+    activeWorkerPool = null;
   }
 });
