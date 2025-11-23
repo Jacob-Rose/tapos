@@ -38,52 +38,6 @@ async function directoryExists(dirPath: string): Promise<boolean> {
   }
 }
 
-/**
- * Load projects using worker pool (highly parallel)
- */
-async function loadDirectoryWithWorkerPool(
-  dirPath: string,
-  maxDepth: number,
-  onProjectFound: (project: ProjectInfo) => void,
-  onError: (filePath: string, error: string) => void
-): Promise<void> {
-  // First, scan for all .als files (fast, no parsing)
-  console.log(`  Scanning for .als files...`);
-  const alsFiles = await scanForALSFiles(dirPath, maxDepth);
-  console.log(`  Found ${alsFiles.length} files to process`);
-
-  if (alsFiles.length === 0) {
-    return;
-  }
-
-  // Terminate any existing pool before creating a new one
-  if (activeWorkerPool) {
-    activeWorkerPool.terminate();
-    activeWorkerPool = null;
-  }
-
-  // Create worker pool and process all files in parallel
-  return new Promise((resolve) => {
-    // Limit to 8 workers max (more causes memory issues)
-    const workerCount = Math.min(8, os.cpus().length);
-
-    const pool = new WorkerPool(
-      workerCount,
-      onProjectFound,
-      () => {
-        // All files processed
-        activeWorkerPool = null;
-        resolve();
-      },
-      onError
-    );
-
-    activeWorkerPool = pool;
-    pool.addFiles(alsFiles);
-    pool.start();
-  });
-}
-
 const createWindow = () => {
   // Create the browser window
   mainWindow = new BrowserWindow({
@@ -206,93 +160,29 @@ async function loadAllProjects() {
     mainWindow.webContents.send('projects-loaded', []);
   }
 
-  console.log(`Starting parallel load of ${enabledDirs.length} directories...`);
+  console.log(`Starting load of ${enabledDirs.length} directories...`);
 
-  const allProjectsCollector: ProjectInfo[] = [];
-
-  // Load all directories in parallel using Promise.allSettled
-  const loadPromises = enabledDirs.map(async (dir): Promise<DirectoryLoadResult> => {
-    console.log(`Checking directory: ${dir.path}`);
-
-    // Check if directory exists
-    const exists = await directoryExists(dir.path);
-
-    if (!exists) {
-      console.warn(`Directory not found or inaccessible: ${dir.path}`);
-      return {
-        path: dir.path,
-        projects: [] as ProjectInfo[],
-        error: 'Directory not found',
-        invalid: true
-      };
-    }
-
-    // Use worker pool for loading (highly parallel)
-    const recursionDepth = dir.recursive ? Infinity : 1;
-    console.log(`Loading projects from: ${dir.path} (depth: ${dir.recursive ? 'unlimited' : '1 level'})`);
-
-    const dirProjects: ProjectInfo[] = [];
-
-    try {
-      await loadDirectoryWithWorkerPool(
-        dir.path,
-        recursionDepth,
-        (project: ProjectInfo) => {
-          // Send each project individually to renderer as it's found
-          dirProjects.push(project);
-          allProjectsCollector.push(project);
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('project-added', project);
-          }
-        },
-        (filePath: string, error: string) => {
-          console.error(`Failed to parse ${filePath}:`, error);
-        }
-      );
-
-      console.log(`  > Loaded ${dirProjects.length} projects from ${dir.path}`);
-      return {
-        path: dir.path,
-        projects: dirProjects,
-        error: null,
-        invalid: false
-      };
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error(`Error loading from ${dir.path}:`, errorMsg);
-      return {
-        path: dir.path,
-        projects: dirProjects,
-        error: errorMsg,
-        invalid: false
-      };
-    }
-  });
-
-  // Wait for all directories to finish loading (in parallel)
-  const results = await Promise.allSettled(loadPromises);
-
-  // Process results
-  const allProjects: ProjectInfo[] = [];
-  const errors: string[] = [];
+  // First, scan all directories to collect all .als files
+  const allFiles: string[] = [];
   const invalidDirs: string[] = [];
 
-  results.forEach((result) => {
-    if (result.status === 'fulfilled') {
-      const { path, projects, error, invalid } = result.value;
+  for (const dir of enabledDirs) {
+    console.log(`Checking directory: ${dir.path}`);
 
-      if (invalid) {
-        invalidDirs.push(path);
-        errors.push(`Directory not found: ${path}`);
-      } else if (error) {
-        errors.push(`${path}: ${error}`);
-      } else {
-        allProjects.push(...projects);
-      }
-    } else {
-      console.error('Unexpected promise rejection:', result.reason);
+    const exists = await directoryExists(dir.path);
+    if (!exists) {
+      console.warn(`Directory not found or inaccessible: ${dir.path}`);
+      invalidDirs.push(dir.path);
+      continue;
     }
-  });
+
+    const recursionDepth = dir.recursive ? Infinity : 1;
+    console.log(`Scanning: ${dir.path} (depth: ${dir.recursive ? 'unlimited' : '1 level'})`);
+
+    const alsFiles = await scanForALSFiles(dir.path, recursionDepth);
+    console.log(`  Found ${alsFiles.length} files in ${dir.path}`);
+    allFiles.push(...alsFiles);
+  }
 
   // Clean up invalid directories from preferences
   if (invalidDirs.length > 0) {
@@ -301,16 +191,55 @@ async function loadAllProjects() {
     console.log(`Removed ${invalidDirs.length} invalid directories from preferences`);
   }
 
-  console.log(`Total: Loaded ${allProjectsCollector.length} projects from ${enabledDirs.length - invalidDirs.length} valid directories`);
+  if (allFiles.length === 0) {
+    console.log('No .als files found in any directory');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('projects-loaded', []);
+    }
+    return;
+  }
+
+  console.log(`Total: ${allFiles.length} files to process from ${enabledDirs.length - invalidDirs.length} directories`);
+
+  // Terminate any existing pool before creating a new one
+  if (activeWorkerPool) {
+    activeWorkerPool.terminate();
+    activeWorkerPool = null;
+  }
+
+  // Process all files with a single worker pool
+  const allProjectsCollector: ProjectInfo[] = [];
+
+  await new Promise<void>((resolve) => {
+    const workerCount = Math.min(8, os.cpus().length);
+
+    const pool = new WorkerPool(
+      workerCount,
+      (project: ProjectInfo) => {
+        allProjectsCollector.push(project);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('project-added', project);
+        }
+      },
+      () => {
+        activeWorkerPool = null;
+        resolve();
+      },
+      (filePath: string, error: string) => {
+        console.error(`Failed to parse ${filePath}:`, error);
+      }
+    );
+
+    activeWorkerPool = pool;
+    pool.addFiles(allFiles);
+    pool.start();
+  });
+
+  console.log(`Loaded ${allProjectsCollector.length} projects`);
 
   // Final update to renderer (already sent incrementally, but ensure final state)
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('projects-loaded', allProjectsCollector);
-
-    // If there were errors but we still loaded some projects, log them
-    if (errors.length > 0) {
-      console.warn('Some directories had errors:', errors);
-    }
   }
 }
 
