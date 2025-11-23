@@ -290,6 +290,13 @@ function createProjectGroupCard(group) {
   const trackCount = createInfoItem('Track Count', filteredTracks.length);
   infoSection.appendChild(trackCount);
 
+  // Project length/duration
+  const duration = formatDuration(selectedProject.longestTrackLength);
+  if (duration) {
+    const lengthInfo = createInfoItem('Length', duration);
+    infoSection.appendChild(lengthInfo);
+  }
+
   // Show version count
   if (group.versions.length > 1) {
     const versionCount = createInfoItem('Versions', group.versions.length);
@@ -444,6 +451,22 @@ function createTrackItem(track) {
   item.appendChild(name);
 
   return item;
+}
+
+/**
+ * Format duration in seconds to readable string (e.g., "2:34" or "1:02:34")
+ */
+function formatDuration(seconds) {
+  if (!seconds || seconds <= 0) return null;
+
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+  return `${minutes}:${secs.toString().padStart(2, '0')}`;
 }
 
 /**

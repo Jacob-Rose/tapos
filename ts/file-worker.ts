@@ -10,6 +10,95 @@ import { ProjectInfo, TrackInfo } from './types';
 const PROJECT_PARSE_TIMEOUT = 30000;
 
 /**
+ * Extract the project length in seconds by finding the furthest clip end
+ */
+function extractProjectLength(liveSet: any): number | undefined {
+  // Get tempo (BPM) - stored in MainTrack > DeviceChain > Mixer > Tempo
+  let tempo = 120; // Default Ableton tempo
+
+  // The tempo is in MainTrack (the transport/master section), not inside Tracks
+  if (liveSet.MainTrack?.DeviceChain?.Mixer?.Tempo?.Manual?.['@_Value']) {
+    tempo = parseFloat(liveSet.MainTrack.DeviceChain.Mixer.Tempo.Manual['@_Value']);
+  }
+
+  let furthestBeat = 0;
+
+  // Helper to process clips from a track
+  function processTrackClips(track: any) {
+    if (!track?.DeviceChain?.MainSequencer) return;
+
+    const mainSeq = track.DeviceChain.MainSequencer;
+
+    // Check arrangement clips (ClipTimeable > ArrangerAutomation > Events)
+    const arrangerEvents = mainSeq.ClipTimeable?.ArrangerAutomation?.Events;
+    if (arrangerEvents) {
+      const clipTypes = ['MidiClip', 'AudioClip'];
+      for (const clipType of clipTypes) {
+        const clips = arrangerEvents[clipType];
+        if (clips) {
+          const clipArray = Array.isArray(clips) ? clips : [clips];
+          for (const clip of clipArray) {
+            if (clip) {
+              const startTime = parseFloat(clip['@_Time'] || '0');
+              const currentEnd = parseFloat(clip.CurrentEnd?.['@_Value'] || '0');
+              const currentStart = parseFloat(clip.CurrentStart?.['@_Value'] || '0');
+              const clipEnd = startTime + (currentEnd - currentStart);
+              if (clipEnd > furthestBeat) {
+                furthestBeat = clipEnd;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Check session clips (ClipSlotList) - for session-based projects
+    const clipSlots = mainSeq.ClipSlotList?.ClipSlot;
+    if (clipSlots) {
+      const slotArray = Array.isArray(clipSlots) ? clipSlots : [clipSlots];
+      for (const slot of slotArray) {
+        const clipValue = slot?.ClipSlot?.Value;
+        if (clipValue) {
+          const clipTypes = ['MidiClip', 'AudioClip'];
+          for (const clipType of clipTypes) {
+            const clip = clipValue[clipType];
+            if (clip) {
+              const currentEnd = parseFloat(clip.CurrentEnd?.['@_Value'] || '0');
+              const currentStart = parseFloat(clip.CurrentStart?.['@_Value'] || '0');
+              const clipLength = currentEnd - currentStart;
+              // For session clips, track the longest clip (not timeline position)
+              if (clipLength > furthestBeat) {
+                furthestBeat = clipLength;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Process all track types
+  const trackTypes = ['AudioTrack', 'MidiTrack', 'ReturnTrack'];
+  for (const trackType of trackTypes) {
+    const tracks = liveSet.Tracks?.[trackType];
+    if (tracks) {
+      const trackArray = Array.isArray(tracks) ? tracks : [tracks];
+      for (const track of trackArray) {
+        processTrackClips(track);
+      }
+    }
+  }
+
+  if (furthestBeat === 0) {
+    return undefined;
+  }
+
+  // Convert beats to seconds: beats / bpm * 60
+  const lengthInSeconds = (furthestBeat / tempo) * 60;
+  return lengthInSeconds;
+}
+
+/**
  * Parse a single .als project file
  */
 async function parseProject(projectPath: string): Promise<ProjectInfo> {
@@ -84,12 +173,16 @@ async function parseProject(projectPath: string): Promise<ProjectInfo> {
           }
         }
 
+        // Extract project length from clips
+        const projectLength = extractProjectLength(liveSet);
+
         const projectInfo: ProjectInfo = {
           name: projectName,
           filePath: projectPath,
           trackCount: tracks.length,
           tracks: tracks,
-          lastModified: lastModified
+          lastModified: lastModified,
+          longestTrackLength: projectLength
         };
 
         resolve(projectInfo);
